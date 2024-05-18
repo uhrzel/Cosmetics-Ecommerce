@@ -491,26 +491,39 @@ class Master extends DBConnection
 			$data = '';
 			$cart = $this->conn->query("SELECT c.*,p.name,i.price,p.id as pid from `cart` c inner join `inventory` i on i.id=c.inventory_id inner join products p on p.id = i.product_id where c.client_id ='{$client_id}' ");
 			while ($row = $cart->fetch_assoc()) :
-				if (!empty($data)) $data .= ", ";
-				$total = $row['price'] * $row['quantity'];
-				$data .= "('{$order_id}','{$row['pid']}','{$row['quantity']}','{$row['price']}', $total)";
+				// Check if inventory_id exists in inventory table
+				$inventory_check = $this->conn->query("SELECT * FROM `inventory` WHERE id = '{$row['inventory_id']}'")->num_rows;
+				if ($inventory_check > 0) {
+					if (!empty($data)) $data .= ", ";
+					$total = $row['price'] * $row['quantity'];
+					$data .= "('{$order_id}','{$row['inventory_id']}','{$row['quantity']}','{$row['price']}', $total)";
+				} else {
+					// Handle case where inventory_id does not exist
+					// You can choose to skip this item or handle it as needed
+				}
 			endwhile;
-			$list_sql = "INSERT INTO `order_list` (order_id,inventory_id,quantity,price,total) VALUES {$data} ";
-			$save_olist = $this->conn->query($list_sql);
-			if ($this->capture_err())
-				return $this->capture_err();
-			if ($save_olist) {
-				$empty_cart = $this->conn->query("DELETE FROM `cart` where client_id = '{$client_id}'");
-				$data = " order_id = '{$order_id}'";
-				$data .= " ,total_amount = '{$amount}'";
-				$save_sales = $this->conn->query("INSERT INTO `sales` set $data");
+			if (!empty($data)) {
+				$list_sql = "INSERT INTO `order_list` (order_id,inventory_id,quantity,price,total) VALUES {$data} ";
+				$save_olist = $this->conn->query($list_sql);
 				if ($this->capture_err())
 					return $this->capture_err();
-				$resp['status'] = 'success';
-				$this->settings->set_flashdata('success', " Order has been placed successfully.");
+				if ($save_olist) {
+					$empty_cart = $this->conn->query("DELETE FROM `cart` where client_id = '{$client_id}'");
+					$data = " order_id = '{$order_id}'";
+					$data .= " ,total_amount = '{$amount}'";
+					$save_sales = $this->conn->query("INSERT INTO `sales` set $data");
+					if ($this->capture_err())
+						return $this->capture_err();
+					$resp['status'] = 'success';
+					$this->settings->set_flashdata('success', " Order has been placed successfully.");
+				} else {
+					$resp['status'] = 'failed';
+					$resp['err_sql'] = $save_olist;
+				}
 			} else {
+				// Handle case where no valid inventory_id exists
 				$resp['status'] = 'failed';
-				$resp['err_sql'] = $save_olist;
+				$resp['error'] = 'No valid inventory_id found.';
 			}
 		} else {
 			$resp['status'] = 'failed';
@@ -518,6 +531,7 @@ class Master extends DBConnection
 		}
 		return json_encode($resp);
 	}
+
 	function update_order_status()
 	{
 		extract($_POST);
